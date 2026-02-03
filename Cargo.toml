@@ -1,0 +1,29 @@
+[package]
+name = "hid_monitor"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hid_monitor"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[[bin]]
+name = "hid_monitor_example"
+path = "src/main.rs"
+
+[dependencies]
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58.0", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_System_Threading",
+    "Win32_System_LibraryLoader",
+    "Win32_Graphics_Gdi"
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.9"
+io-kit-sys = "0.1"
