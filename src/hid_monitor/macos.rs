@@ -149,10 +149,8 @@ extern "C" fn on_match(ctx: *mut c_void, _result: i32, _sender: *mut c_void, dev
     unsafe {
         if ctx.is_null() { return; }
         let tx = &*(ctx as *mut Sender<HidEvent>);
-        // let (path, vid, pid) = device_to_path_vid_pid(dev);
-        // let _ = tx.send(HidEvent::Arrived(DeviceInfo { path, vid, pid }));
-        // 为了节约性能，直接发送空路径就行，外面会使用hidapi进行详细查询
-        let _ = tx.send(HidEvent::Arrived(DeviceInfo { path: String::new(), vid: None, pid: None }));
+        let (path, vid, pid) = device_to_path_vid_pid(dev);
+        let _ = tx.send(HidEvent::Arrived(DeviceInfo { path, vid, pid }));
     }
 }
 
@@ -160,10 +158,8 @@ extern "C" fn on_remove(ctx: *mut c_void, _result: i32, _sender: *mut c_void, de
     unsafe {
         if ctx.is_null() { return; }
         let tx = &*(ctx as *mut Sender<HidEvent>);
-        // let (path, vid, pid) = device_to_path_vid_pid(dev);
-        // let _ = tx.send(HidEvent::Removed(DeviceInfo { path, vid, pid }));
-        // 为了节约性能，直接发送空路径就行，外面会使用hidapi进行详细查询
-        let _ = tx.send(HidEvent::Removed(DeviceInfo { path: String::new(), vid: None, pid: None }));
+        let (path, vid, pid) = device_to_path_vid_pid(dev);
+        let _ = tx.send(HidEvent::Removed(DeviceInfo { path, vid, pid }));
     }
 }
 
