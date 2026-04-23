@@ -1,6 +1,6 @@
 [package]
 name = "hid_monitor"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "Cross-platform Rust library for monitoring HID device plug/unplug events and enumerating current HID devices. Supports Windows and macOS."
 license = "MIT"

@@ -35,6 +35,8 @@ type CFNumberRef = *const c_void;
 type IOReturn = i32;
 #[allow(non_camel_case_types)]
 type io_registry_entry_t = u32;
+#[allow(non_camel_case_types)]
+type kern_return_t = i32;
 
 #[link(name = "IOKit", kind = "framework")]
 extern "C" {
@@ -57,6 +59,7 @@ extern "C" {
     fn IOHIDElementGetCookie(element: IOHIDElementRef) -> u32;
 
     fn IORegistryEntryGetPath(entry: io_registry_entry_t, plane: *const c_char, path: *mut c_char, path_size: u32) -> i32;
+    fn IORegistryEntryGetRegistryEntryID(entry: io_registry_entry_t, entry_id: *mut u64) -> kern_return_t;
 
     // CFString constants from IOKit HID headers
     // static kIOHIDVendorIDKey: CFStringRef;
@@ -107,20 +110,22 @@ unsafe fn get_u16_prop(dev: IOHIDDeviceRef, key_name: &str) -> Option<u16> {
 
 unsafe fn device_base_path(dev: IOHIDDeviceRef) -> String {
     let service = IOHIDDeviceGetService(dev);
-    let mut buf = [0i8; 512];
-    let mut path = String::new();
     if service != 0 {
+        let mut entry_id: u64 = 0;
+        if IORegistryEntryGetRegistryEntryID(service, &mut entry_id as *mut u64) == 0 {
+            return format!("DevSrvsID:{entry_id}");
+        }
+
+        let mut buf = [0i8; 512];
         let plane = CString::new("IOService").unwrap();
         if IORegistryEntryGetPath(service, plane.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) == 0 {
             let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
             let bytes: Vec<u8> = buf[..len].iter().map(|&c| c as u8).collect();
-            path = String::from_utf8_lossy(&bytes).into_owned();
+            return String::from_utf8_lossy(&bytes).into_owned();
         }
     }
-    if path.is_empty() {
-        path = format!("macos-hid:svc={}", service);
-    }
-    path
+
+    format!("macos-hid:svc={service}")
 }
 
 unsafe fn device_to_collection_infos(dev: IOHIDDeviceRef) -> Vec<DeviceInfo> {
@@ -156,7 +161,7 @@ unsafe fn device_to_collection_infos(dev: IOHIDDeviceRef) -> Vec<DeviceInfo> {
                 let usage_page = IOHIDElementGetUsagePage(el);
                 let usage = IOHIDElementGetUsage(el);
                 infos.push(DeviceInfo {
-                    path: format!("{base_path}#cookie={cookie}"),
+                    path: base_path.clone(),
                     vid,
                     pid,
                     usage_page: u16::try_from(usage_page).ok(),
