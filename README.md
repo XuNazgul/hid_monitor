@@ -8,7 +8,7 @@ This is a cross-platform Rust library for **monitoring HID device plug/unplug ev
 ## 特性 Features
 
 - **设备枚举 Device enumeration**：列出当前所有 HID 设备（含路径、VID、PID 等信息）。  
-  List all currently connected HID devices (path, VID, PID, etc.).
+  List all currently connected HID devices (path, VID, PID, usage page, usage, etc.).
 - **事件监听 Event monitoring**：实时监听 HID 设备的插入和移除事件。  
   Receive real-time events when HID devices are plugged in or removed.
 - **跨平台 Cross-platform**：统一 API，内部根据目标平台调用 Windows / macOS 实现。  
@@ -44,10 +44,12 @@ use hid_monitor::{list_devices};
 fn main() {
     for device in list_devices() {
         println!(
-            "Device: path={} vid={:?} pid={:?}",
+            "Device: path={} vid={:?} pid={:?} usage_page={:?} usage={:?}",
             device.path,
             device.vid,
             device.pid,
+            device.usage_page,
+            device.usage,
         );
     }
 }
@@ -67,14 +69,14 @@ fn main() {
         match rx.recv() {
             Ok(HidEvent::Arrived(info)) => {
                 println!(
-                    "Device arrived: path={} vid={:?} pid={:?}",
-                    info.path, info.vid, info.pid
+                    "Device arrived: path={} vid={:?} pid={:?} usage_page={:?} usage={:?}",
+                    info.path, info.vid, info.pid, info.usage_page, info.usage
                 );
             }
             Ok(HidEvent::Removed(info)) => {
                 println!(
-                    "Device removed: path={} vid={:?} pid={:?}",
-                    info.path, info.vid, info.pid
+                    "Device removed: path={} vid={:?} pid={:?} usage_page={:?} usage={:?}",
+                    info.path, info.vid, info.pid, info.usage_page, info.usage
                 );
             }
             Err(e) => {
@@ -106,4 +108,3 @@ fn main() {
 
 本项目采用 **MIT License**。  
 This project is licensed under the **MIT License**.
-
