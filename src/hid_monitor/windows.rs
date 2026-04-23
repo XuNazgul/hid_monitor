@@ -5,8 +5,14 @@ use std::sync::OnceLock;
 use std::thread;
 
 use windows::core::PCWSTR;
-use windows::Win32::Devices::HumanInterfaceDevice::HidD_GetHidGuid;
+use windows::Win32::Devices::HumanInterfaceDevice::{
+    HidD_FreePreparsedData, HidD_GetAttributes, HidD_GetHidGuid, HidD_GetPreparsedData, HidP_GetCaps,
+    HIDD_ATTRIBUTES, HIDP_CAPS, PHIDP_PREPARSED_DATA,
+};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassW, TranslateMessage,
@@ -14,6 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     RegisterDeviceNotificationW, HDEVNOTIFY, DEV_BROADCAST_DEVICEINTERFACE_W, DEV_BROADCAST_HDR,
     DEVICE_NOTIFY_WINDOW_HANDLE, DBT_DEVTYP_DEVICEINTERFACE, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE,
 };
+use windows::Win32::Foundation::CloseHandle;
 
 use super::{DeviceInfo, HidEvent};
 
@@ -136,8 +143,12 @@ unsafe fn parse_device_interface(lparam: LPARAM) -> Option<String> {
 
 unsafe fn handle_device_change(_hwnd: HWND, lparam: LPARAM, arrival: bool) {
     if let Some(path) = parse_device_interface(lparam) {
-        let (vid, pid) = parse_vid_pid_from_path(&path);
-        let info = DeviceInfo { path, vid, pid };
+        let (vid, pid, usage_page, usage) = get_hid_attributes_and_usage(&path)
+            .unwrap_or_else(|| {
+                let (vid, pid) = parse_vid_pid_from_path(&path);
+                (vid, pid, None, None)
+            });
+        let info = DeviceInfo { path, vid, pid, usage_page, usage };
         if arrival {
             send_event(HidEvent::Arrived(info));
         } else {
@@ -146,20 +157,115 @@ unsafe fn handle_device_change(_hwnd: HWND, lparam: LPARAM, arrival: bool) {
     }
 }
 
+unsafe fn get_hid_attributes_and_usage(
+    device_path: &str,
+) -> Option<(Option<u16>, Option<u16>, Option<u16>, Option<u16>)> {
+    let wide: Vec<u16> = device_path.encode_utf16().chain(std::iter::once(0)).collect();
+    let handle = CreateFileW(
+        PCWSTR(wide.as_ptr()),
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        None,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        None,
+    )
+    .ok()?;
+
+    let result = (|| {
+        let mut attributes = HIDD_ATTRIBUTES::default();
+        attributes.Size = size_of::<HIDD_ATTRIBUTES>() as u32;
+        if !HidD_GetAttributes(handle, &mut attributes).as_bool() {
+            return None;
+        }
+
+        let mut prep: PHIDP_PREPARSED_DATA = std::mem::zeroed();
+        if !HidD_GetPreparsedData(handle, &mut prep).as_bool() || prep.0 == 0 {
+            return Some((Some(attributes.VendorID), Some(attributes.ProductID), None, None));
+        }
+
+        let mut caps = HIDP_CAPS::default();
+        let status = HidP_GetCaps(prep, &mut caps);
+        let (usage_page, usage) = if status.0 >= 0 {
+            (Some(caps.UsagePage), Some(caps.Usage))
+        } else {
+            (None, None)
+        };
+
+        let _ = HidD_FreePreparsedData(prep);
+        Some((
+            Some(attributes.VendorID),
+            Some(attributes.ProductID),
+            usage_page,
+            usage,
+        ))
+    })();
+
+    let _ = CloseHandle(handle);
+    result
+}
+
 fn parse_vid_pid_from_path(path: &str) -> (Option<u16>, Option<u16>) {
-    // Typical path contains vid_XXXX&pid_YYYY
-    let lower = path.to_ascii_lowercase();
-    let mut vid = None;
-    let mut pid = None;
-    for part in lower.split(&['#', '&'][..]) {
-        if let Some(hex) = part.strip_prefix("vid_") {
-            if let Ok(v) = u16::from_str_radix(hex, 16) { vid = Some(v); }
+    fn read_hex_u16_suffix(s: &str) -> Option<u16> {
+        if s.is_empty() {
+            return None;
         }
-        if let Some(hex) = part.strip_prefix("pid_") {
-            if let Ok(p) = u16::from_str_radix(hex, 16) { pid = Some(p); }
+        let hex_len = s
+            .as_bytes()
+            .iter()
+            .take_while(|&&b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            .count();
+        if hex_len == 0 {
+            return None;
         }
+        let hex = &s[..hex_len];
+        if let Ok(v) = u32::from_str_radix(hex, 16) {
+            if v <= 0xFFFF && hex_len <= 4 {
+                return Some(v as u16);
+            }
+            if hex_len == 6 || hex_len == 8 {
+                return u16::from_str_radix(&hex[(hex_len - 4)..], 16).ok();
+            }
+        }
+        None
     }
+
+    fn parse_from_pattern(lower: &str, pat: &str) -> Option<u16> {
+        lower
+            .match_indices(pat)
+            .filter_map(|(idx, _)| read_hex_u16_suffix(&lower[(idx + pat.len())..]))
+            .next()
+    }
+
+    let lower = path.to_ascii_lowercase();
+    let vid = parse_from_pattern(&lower, "vid_")
+        .or_else(|| parse_from_pattern(&lower, "vid&"))
+        .or_else(|| parse_from_pattern(&lower, "dev_vid&"));
+    let pid = parse_from_pattern(&lower, "pid_")
+        .or_else(|| parse_from_pattern(&lower, "pid&"))
+        .or_else(|| parse_from_pattern(&lower, "dev_pid&"));
     (vid, pid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_vid_pid_from_path;
+
+    #[test]
+    fn parse_usb_style_vid_pid() {
+        let p = r"\\?\hid#vid_a8a5&pid_3000&mi_01&col08#8&385525a&0&0007#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+        let (vid, pid) = parse_vid_pid_from_path(p);
+        assert_eq!(vid, Some(0xA8A5));
+        assert_eq!(pid, Some(0x3000));
+    }
+
+    #[test]
+    fn parse_bluetooth_gatt_style_vid_pid() {
+        let p = r"\\?\hid#{00001812-0000-1000-8000-00805f9b34fb}_dev_vid&02a8a4_pid&2365_rev&0001_4142db4e1cf6&col06#9&8bb905b&0&0005#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+        let (vid, pid) = parse_vid_pid_from_path(p);
+        assert_eq!(vid, Some(0xA8A4));
+        assert_eq!(pid, Some(0x2365));
+    }
 }
 
 pub fn list_devices_windows() -> Vec<DeviceInfo> {
@@ -201,8 +307,12 @@ pub fn list_devices_windows() -> Vec<DeviceInfo> {
                 while *ptr.add(len) != 0 { len += 1; }
                 let slice = std::slice::from_raw_parts(ptr, len);
                 let path = String::from_utf16_lossy(slice);
-                let (vid, pid) = parse_vid_pid_from_path(&path);
-                devices.push(DeviceInfo { path, vid, pid });
+                let (vid, pid, usage_page, usage) = get_hid_attributes_and_usage(&path)
+                    .unwrap_or_else(|| {
+                        let (vid, pid) = parse_vid_pid_from_path(&path);
+                        (vid, pid, None, None)
+                    });
+                devices.push(DeviceInfo { path, vid, pid, usage_page, usage });
             }
             index += 1;
         }

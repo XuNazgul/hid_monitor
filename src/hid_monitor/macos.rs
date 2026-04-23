@@ -94,9 +94,13 @@ unsafe fn get_u16_prop(dev: IOHIDDeviceRef, key_name: &str) -> Option<u16> {
     cfnumber_to_u16(v)
 }
 
-unsafe fn device_to_path_vid_pid(dev: IOHIDDeviceRef) -> (String, Option<u16>, Option<u16>) {
+unsafe fn device_to_path_vid_pid_usage(
+    dev: IOHIDDeviceRef,
+) -> (String, Option<u16>, Option<u16>, Option<u16>, Option<u16>) {
     let vid = get_u16_prop(dev, "VendorID");
     let pid = get_u16_prop(dev, "ProductID");
+    let usage_page = get_u16_prop(dev, "PrimaryUsagePage");
+    let usage = get_u16_prop(dev, "PrimaryUsage");
 
     let service = IOHIDDeviceGetService(dev);
     let mut buf = [0i8; 512];
@@ -112,7 +116,7 @@ unsafe fn device_to_path_vid_pid(dev: IOHIDDeviceRef) -> (String, Option<u16>, O
     if path.is_empty() {
         path = format!("macos-hid:vid={:?}:pid={:?}:svc={}", vid, pid, service);
     }
-    (path, vid, pid)
+    (path, vid, pid, usage_page, usage)
 }
 
 // Implement device enumeration via IOHIDManagerCopyDevices
@@ -132,8 +136,14 @@ pub fn list_devices_macos() -> Vec<DeviceInfo> {
                 for p in arr {
                     if !p.is_null() {
                         let dev = p as IOHIDDeviceRef;
-                        let (path, vid, pid) = device_to_path_vid_pid(dev);
-                        devices.push(DeviceInfo { path, vid, pid });
+                        let (path, vid, pid, usage_page, usage) = device_to_path_vid_pid_usage(dev);
+                        devices.push(DeviceInfo {
+                            path,
+                            vid,
+                            pid,
+                            usage_page,
+                            usage,
+                        });
                     }
                 }
             }
@@ -149,8 +159,14 @@ extern "C" fn on_match(ctx: *mut c_void, _result: i32, _sender: *mut c_void, dev
     unsafe {
         if ctx.is_null() { return; }
         let tx = &*(ctx as *mut Sender<HidEvent>);
-        let (path, vid, pid) = device_to_path_vid_pid(dev);
-        let _ = tx.send(HidEvent::Arrived(DeviceInfo { path, vid, pid }));
+        let (path, vid, pid, usage_page, usage) = device_to_path_vid_pid_usage(dev);
+        let _ = tx.send(HidEvent::Arrived(DeviceInfo {
+            path,
+            vid,
+            pid,
+            usage_page,
+            usage,
+        }));
     }
 }
 
@@ -158,8 +174,14 @@ extern "C" fn on_remove(ctx: *mut c_void, _result: i32, _sender: *mut c_void, de
     unsafe {
         if ctx.is_null() { return; }
         let tx = &*(ctx as *mut Sender<HidEvent>);
-        let (path, vid, pid) = device_to_path_vid_pid(dev);
-        let _ = tx.send(HidEvent::Removed(DeviceInfo { path, vid, pid }));
+        let (path, vid, pid, usage_page, usage) = device_to_path_vid_pid_usage(dev);
+        let _ = tx.send(HidEvent::Removed(DeviceInfo {
+            path,
+            vid,
+            pid,
+            usage_page,
+            usage,
+        }));
     }
 }
 

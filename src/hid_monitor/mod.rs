@@ -5,6 +5,8 @@ pub struct DeviceInfo {
     pub path: String,
     pub vid: Option<u16>,
     pub pid: Option<u16>,
+    pub usage_page: Option<u16>,
+    pub usage: Option<u16>,
 }
 
 #[derive(Debug, Clone)]

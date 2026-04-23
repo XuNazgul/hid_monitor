@@ -3,7 +3,10 @@ use hid_monitor::{start_hid_monitor, list_devices, HidEvent};
 fn main() {
     // Print current devices without sending HID GET_DESCRIPTOR
     for d in list_devices() {
-        println!("present: path={} vid={:?} pid={:?}", d.path, d.vid, d.pid);
+        println!(
+            "present: path={} vid={:?} pid={:?} usage_page={:?} usage={:?}",
+            d.path, d.vid, d.pid, d.usage_page, d.usage
+        );
     }
 
     // Start HID monitor
@@ -13,10 +16,16 @@ fn main() {
     loop {
         match rx.recv() {
             Ok(HidEvent::Arrived(info)) => {
-                println!("arrived: path={} vid={:?} pid={:?}", info.path, info.vid, info.pid);
+                println!(
+                    "arrived: path={} vid={:?} pid={:?} usage_page={:?} usage={:?}",
+                    info.path, info.vid, info.pid, info.usage_page, info.usage
+                );
             }
             Ok(HidEvent::Removed(info)) => {
-                println!("removed: path={} vid={:?} pid={:?}", info.path, info.vid, info.pid);
+                println!(
+                    "removed: path={} vid={:?} pid={:?} usage_page={:?} usage={:?}",
+                    info.path, info.vid, info.pid, info.usage_page, info.usage
+                );
             }
             Err(e) => {
                 eprintln!("monitor channel error: {}", e);
